@@ -1,0 +1,179 @@
+' ============================================================
+' frmPartsPick - 部品選択フォーム コード
+' ============================================================
+' このコードを UserForm「frmPartsPick」のコードモジュールに貼り付けてください。
+'
+' 必要なコントロール（フォーム上に配置）：
+'   txtFilter      (TextBox)         - 絞り込み用テキストボックス
+'   lstCandidates  (ListBox)         - 候補一覧（3列: C/D/A）
+'   lblHint        (Label)           - 操作説明テキスト
+'   lblStatus      (Label)           - 件数・ステータス表示
+'   btnOK          (CommandButton)   - 決定ボタン (Default = True)
+'   btnCancel      (CommandButton)   - キャンセルボタン (Cancel = True)
+' ============================================================
+Option Explicit
+
+Private m_Updating As Boolean  ' 内部更新中フラグ（txtFilter_Change の再帰防止）
+
+' ============================================================
+' フォーム初期化
+' ============================================================
+Private Sub UserForm_Initialize()
+    ' フォーム設定
+    Me.Caption = "部品選択"
+    Me.Width = 620
+    Me.Height = 420
+
+    ' ListBox 設定
+    With lstCandidates
+        .ColumnCount = 3
+        .ColumnWidths = "200;200;120"
+        .ColumnHeads = False
+    End With
+
+    ' ヒントラベル
+    On Error Resume Next
+    lblHint.Caption = Chr(8593) & Chr(8595) & ":選択  Enter:決定  Esc:キャンセル"
+    On Error GoTo 0
+
+    ' 初期値設定（グローバル変数から）
+    m_Updating = True
+    txtFilter.Text = modPartsIndex.g_InitialKey
+    m_Updating = False
+
+    ' リスト表示
+    PopulateList
+
+    ' フォーカスをテキストボックスに
+    txtFilter.SetFocus
+End Sub
+
+' ============================================================
+' リスト更新（g_FilteredCandidates からリストボックスを構築）
+' ============================================================
+Private Sub PopulateList()
+    Dim i As Long
+
+    lstCandidates.Clear
+
+    If modPartsIndex.g_FilteredCount = 0 Then
+        UpdateStatus "候補が見つかりません"
+        Exit Sub
+    End If
+
+    For i = 1 To modPartsIndex.g_FilteredCount
+        With modPartsIndex.g_FilteredCandidates(i).Rec
+            lstCandidates.AddItem .ColC
+            lstCandidates.List(lstCandidates.ListCount - 1, 1) = .ColD
+            lstCandidates.List(lstCandidates.ListCount - 1, 2) = .ColA
+        End With
+    Next i
+
+    ' 最初の項目を自動選択
+    If lstCandidates.ListCount > 0 Then
+        lstCandidates.ListIndex = 0
+    End If
+
+    ' ステータス更新
+    If modPartsIndex.g_TotalMatchCount > modPartsIndex.MAX_CANDIDATES Then
+        UpdateStatus modPartsIndex.g_TotalMatchCount & "件中 " & _
+                     modPartsIndex.g_FilteredCount & "件表示 - 候補が多いので絞ってください"
+    Else
+        UpdateStatus modPartsIndex.g_FilteredCount & "件"
+    End If
+End Sub
+
+' ============================================================
+' ステータス表示更新
+' ============================================================
+Private Sub UpdateStatus(ByVal msg As String)
+    On Error Resume Next
+    lblStatus.Caption = msg
+    On Error GoTo 0
+End Sub
+
+' ============================================================
+' テキスト変更時のリアルタイム絞り込み
+' ============================================================
+Private Sub txtFilter_Change()
+    If m_Updating Then Exit Sub
+
+    Dim newKey As String
+    newKey = txtFilter.Text
+
+    If Len(Trim(newKey)) = 0 Then
+        lstCandidates.Clear
+        UpdateStatus "検索文字を入力してください"
+        Exit Sub
+    End If
+
+    ' 再検索（インデックスに対して実行、DB走査なし）
+    modPartsIndex.SearchCandidates newKey
+
+    ' リスト再構築
+    PopulateList
+End Sub
+
+' ============================================================
+' テキストボックスのキー操作
+' ============================================================
+Private Sub txtFilter_KeyDown(ByVal KeyCode As MSForms.ReturnInteger, ByVal Shift As Integer)
+    Select Case KeyCode
+        Case vbKeyDown
+            ' ↓キーでリストボックスにフォーカス移動
+            If lstCandidates.ListCount > 0 Then
+                If lstCandidates.ListIndex < 0 Then
+                    lstCandidates.ListIndex = 0
+                End If
+                lstCandidates.SetFocus
+                KeyCode = 0
+            End If
+        Case vbKeyUp
+            ' ↑キーでもリストボックスの最後にフォーカス移動
+            If lstCandidates.ListCount > 0 Then
+                lstCandidates.ListIndex = lstCandidates.ListCount - 1
+                lstCandidates.SetFocus
+                KeyCode = 0
+            End If
+    End Select
+End Sub
+
+' ============================================================
+' 決定ボタン
+' ============================================================
+Private Sub btnOK_Click()
+    If lstCandidates.ListIndex < 0 Then
+        MsgBox "候補を選択してください。", vbInformation, "確認"
+        Exit Sub
+    End If
+
+    modPartsIndex.g_SelectedIndex = lstCandidates.ListIndex + 1
+    Unload Me
+End Sub
+
+' ============================================================
+' キャンセルボタン
+' ============================================================
+Private Sub btnCancel_Click()
+    modPartsIndex.g_SelectedIndex = -1
+    Unload Me
+End Sub
+
+' ============================================================
+' フォームの×ボタン（右上の閉じるボタン）
+' ============================================================
+Private Sub UserForm_QueryClose(Cancel As Integer, CloseMode As Integer)
+    If CloseMode = vbFormControlMenu Then
+        Cancel = True
+        btnCancel_Click
+    End If
+End Sub
+
+' ============================================================
+' リストボックスのダブルクリックで決定
+' ============================================================
+Private Sub lstCandidates_DblClick(ByVal Cancel As MSForms.ReturnBoolean)
+    If lstCandidates.ListIndex >= 0 Then
+        btnOK_Click
+    End If
+End Sub
