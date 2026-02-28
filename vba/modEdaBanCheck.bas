@@ -8,11 +8,11 @@ Option Explicit
 '
 ' 判定ロジック：
 '   1. I列の値でグループ化（I列空白行はスキップ）
-'   2. 各Iグループ内で、(I, A) 単位で対象Vコードの distinct 数を数える
-'   3. Iグループ全体の vCountSum = 各(I,A)の distinct 数の合計
-'   4. Iグループ内の A列 distinct 種類数 >= 2 なら aBonus = 1、それ以外 0
-'   5. total = vCountSum + aBonus >= 2 なら、そのI値の全行のJ列を薄いブルーに塗る
-'      ただし既にJ列に背景色があるセルは変更しない
+'   2. 各(I, A)単位で対象VコードのDistinct数を数える → vCountSum
+'   3. Iグループ内のA列Distinct種類数 >= 2 なら aBonus = 1
+'   4. Iグループ内のY列が「1」の行数 → yCount
+'   5. total = vCountSum + aBonus + yCount >= 3 なら対象
+'      → そのI値の全行のJ列を薄いブルーに塗る（既存色があれば変更しない）
 ' ============================================================
 
 ' --- 薄いブルーの色定数 ---
@@ -23,17 +23,20 @@ Private Const LIGHT_BLUE_B As Long = 247
 ' --- 対象Vコードリスト ---
 Private Const TARGET_V_CODES As String = "FDR,FDR1,FDR2,FDL,FDL1,FDL2,BDR,BDR1,BDR2,BDL,BDL1,BDL2"
 
+' --- 判定閾値 ---
+Private Const THRESHOLD As Long = 3
+
 ' ============================================================
 ' メインマクロ（Alt+F8 から実行）
 ' ============================================================
 Public Sub 枝番チェック()
     Dim ws As Worksheet
     Dim lastRow As Long
-    Dim dataArr As Variant
     Dim r As Long
     Dim iVal As String
     Dim aVal As String
     Dim vVal As String
+    Dim yVal As String
     Dim iaKey As String
 
     ' --- 対象Vコードを Dictionary に格納（高速判定用） ---
@@ -48,15 +51,19 @@ Public Sub 枝番チェック()
     Next vc
 
     ' --- 集計用 Dictionary ---
-    ' dictIAVCodes: key = "I値" & Chr(0) & "A値" → value = Dictionary(Vコード→True) : (I,A)単位の distinct Vコード
+    ' dictIAVCodes: key="I値" & Chr(0) & "A値" → Dictionary(Vコード→True)
     Dim dictIAVCodes As Object
     Set dictIAVCodes = CreateObject("Scripting.Dictionary")
 
-    ' dictIATypes: key = "I値" → value = Dictionary(A値→True) : I単位の A種類
+    ' dictIATypes: key="I値" → Dictionary(A値→True)
     Dim dictIATypes As Object
     Set dictIATypes = CreateObject("Scripting.Dictionary")
 
-    ' dictIRows: key = "I値" → value = Collection(行番号) : I単位の行番号リスト
+    ' dictIYCount: key="I値" → Y列が「1」の行数
+    Dim dictIYCount As Object
+    Set dictIYCount = CreateObject("Scripting.Dictionary")
+
+    ' dictIRows: key="I値" → Collection(行番号)
     Dim dictIRows As Object
     Set dictIRows = CreateObject("Scripting.Dictionary")
 
@@ -64,14 +71,8 @@ Public Sub 枝番チェック()
     On Error GoTo ErrorHandler
     Set ws = ThisWorkbook.Worksheets("入力シート")
 
-    lastRow = ws.Cells(ws.Rows.Count, "I").End(xlUp).Row
-    Dim lastRowA As Long
-    lastRowA = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row
-    If lastRowA > lastRow Then lastRow = lastRowA
-    Dim lastRowV As Long
-    lastRowV = ws.Cells(ws.Rows.Count, "V").End(xlUp).Row
-    If lastRowV > lastRow Then lastRow = lastRowV
-
+    ' 最終行を A/I/V/Y 列の最大から決定
+    lastRow = GetMaxLastRow(ws, Array("A", "I", "V", "Y"))
     If lastRow < 2 Then
         MsgBox "データがありません（2行目以降が空）。", vbInformation, "枝番チェック"
         Exit Sub
@@ -81,13 +82,11 @@ Public Sub 枝番チェック()
     Application.ScreenUpdating = False
     Application.Calculation = xlCalculationManual
 
-    ' --- A/I/V列を配列で一括読み込み ---
-    Dim arrA As Variant
-    Dim arrI As Variant
-    Dim arrV As Variant
-    arrA = ws.Range("A2:A" & lastRow).Value
-    arrI = ws.Range("I2:I" & lastRow).Value
-    arrV = ws.Range("V2:V" & lastRow).Value
+    ' --- A/I/V/Y列を配列で一括読み込み ---
+    Dim arrA As Variant: arrA = ws.Range("A2:A" & lastRow).Value
+    Dim arrI As Variant: arrI = ws.Range("I2:I" & lastRow).Value
+    Dim arrV As Variant: arrV = ws.Range("V2:V" & lastRow).Value
+    Dim arrY As Variant: arrY = ws.Range("Y2:Y" & lastRow).Value
 
     ' --- 集計ループ ---
     For r = 1 To UBound(arrI, 1)
@@ -96,12 +95,13 @@ Public Sub 枝番チェック()
 
         aVal = Trim(CStr(SafeVariant(arrA(r, 1))))
         vVal = Trim(CStr(SafeVariant(arrV(r, 1))))
+        yVal = Trim(CStr(SafeVariant(arrY(r, 1))))
 
         ' --- I単位の行番号リストに追加 ---
         If Not dictIRows.Exists(iVal) Then
             Set dictIRows(iVal) = New Collection
         End If
-        dictIRows(iVal).Add r + 1  ' 実際の行番号（2行目開始なので +1）
+        dictIRows(iVal).Add r + 1  ' 実際の行番号（2行目開始）
 
         ' --- I単位の A種類を記録 ---
         If Not dictIATypes.Exists(iVal) Then
@@ -122,6 +122,14 @@ Public Sub 枝番チェック()
             dictIAVCodes(iaKey)(vVal) = True
         End If
 
+        ' --- I単位の Y列「1」カウント ---
+        If IsYValueOne(yVal) Then
+            If Not dictIYCount.Exists(iVal) Then
+                dictIYCount(iVal) = CLng(0)
+            End If
+            dictIYCount(iVal) = dictIYCount(iVal) + 1
+        End If
+
 NextRow:
     Next r
 
@@ -132,8 +140,8 @@ NextRow:
     Dim vCountSum As Long
     Dim aTypeCount As Long
     Dim aBonus As Long
+    Dim yCount As Long
     Dim total As Long
-    Dim rowNum As Variant
     Dim targetICount As Long
     Dim lightBlue As Long
 
@@ -141,33 +149,36 @@ NextRow:
     targetICount = 0
 
     For Each iKey In dictIRows.Keys
-        ' vCountSum: (I,A)ごとの distinct Vコード数の合計
+        ' --- vCountSum: (I,A)ごとの distinct Vコード数の合計 ---
         vCountSum = 0
         iaKeys = dictIAVCodes.Keys
         For Each iak In iaKeys
-            ' iaKey の先頭が iKey & Chr(0) で始まるものを合計
             If Left(CStr(iak), Len(CStr(iKey)) + 1) = CStr(iKey) & Chr(0) Then
                 vCountSum = vCountSum + dictIAVCodes(iak).Count
             End If
         Next iak
 
-        ' aTypeCount: I単位のA列種類数
+        ' --- aBonus: A列種類数 >= 2 なら +1 ---
         aTypeCount = 0
         If dictIATypes.Exists(CStr(iKey)) Then
             aTypeCount = dictIATypes(CStr(iKey)).Count
         End If
-
-        ' aBonus
         If aTypeCount >= 2 Then
             aBonus = 1
         Else
             aBonus = 0
         End If
 
-        ' 最終判定
-        total = vCountSum + aBonus
+        ' --- yCount: Y列が「1」の行数 ---
+        yCount = 0
+        If dictIYCount.Exists(CStr(iKey)) Then
+            yCount = dictIYCount(CStr(iKey))
+        End If
 
-        If total >= 2 Then
+        ' --- 最終判定 ---
+        total = vCountSum + aBonus + yCount
+
+        If total >= THRESHOLD Then
             targetICount = targetICount + 1
             ' このI値の全行のJ列を着色（既存の背景色があれば変更しない）
             Dim rowCol As Collection
@@ -176,7 +187,6 @@ NextRow:
             For idx = 1 To rowCol.Count
                 Dim rn As Long
                 rn = rowCol(idx)
-                ' 既にJ列に背景色がある場合は変更しない
                 If ws.Cells(rn, "J").Interior.Pattern = xlNone Then
                     ws.Cells(rn, "J").Interior.Color = lightBlue
                 End If
@@ -184,7 +194,7 @@ NextRow:
         End If
     Next iKey
 
-    ' --- 完了メッセージ ---
+    ' --- 完了 ---
     Application.ScreenUpdating = True
     Application.Calculation = xlCalculationAutomatic
 
@@ -197,6 +207,31 @@ ErrorHandler:
     Application.Calculation = xlCalculationAutomatic
     MsgBox "エラーが発生しました: " & Err.Description, vbExclamation, "枝番チェック"
 End Sub
+
+' ============================================================
+' Y列の「1」判定（Trim＋空白除去して "1" かチェック）
+' ============================================================
+Private Function IsYValueOne(ByVal s As String) As Boolean
+    s = Trim(s)
+    s = Replace(s, " ", "")
+    s = Replace(s, ChrW(&H3000), "")
+    IsYValueOne = (s = "1")
+End Function
+
+' ============================================================
+' 複数列から最終行の最大値を取得
+' ============================================================
+Private Function GetMaxLastRow(ByVal ws As Worksheet, ByVal cols As Variant) As Long
+    Dim mx As Long
+    Dim c As Variant
+    Dim lr As Long
+    mx = 1
+    For Each c In cols
+        lr = ws.Cells(ws.Rows.Count, CStr(c)).End(xlUp).Row
+        If lr > mx Then mx = lr
+    Next c
+    GetMaxLastRow = mx
+End Function
 
 ' ============================================================
 ' Variant のセーフ変換（エラー値・Null・Empty 対応）
