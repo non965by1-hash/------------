@@ -404,13 +404,17 @@ Private Function CompareCandidates(ByRef a As CandidateRecord, ByRef b As Candid
 End Function
 
 ' ============================================================
-' K列背景色制御（元J列 → 右に1マスずらし）
+' K列背景色制御 + Y列に「1」設定（元J列 → 右に1マスずらし）
+' DB E列が1扱い → K列赤 + Y列に"1"
+' DB E列が1扱いでない → K列塗りつぶし無し + Y列を空白
 ' ============================================================
 Private Sub ApplyRedBackground(ByVal ws As Worksheet, ByVal Row As Long, ByVal eValue As String)
     If IsValueOne(eValue) Then
         ws.Cells(Row, COL_RED_BG).Interior.Color = RGB(255, 0, 0)
+        ws.Cells(Row, "Y").Value = "1"
     Else
         ws.Cells(Row, COL_RED_BG).Interior.Pattern = xlNone
+        ws.Cells(Row, "Y").Value = ""
     End If
 End Sub
 
