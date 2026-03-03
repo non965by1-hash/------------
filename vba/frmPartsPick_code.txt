@@ -24,7 +24,7 @@ Private Sub UserForm_Initialize()
     Me.Width = 620
     Me.Height = 420
 
-    ' ListBox 設定
+    ' ListBox 設定（3列: C / D / A）
     With lstCandidates
         .ColumnCount = 3
         .ColumnWidths = "200;200;120"
@@ -33,7 +33,7 @@ Private Sub UserForm_Initialize()
 
     ' ヒントラベル
     On Error Resume Next
-    lblHint.Caption = Chr(8593) & Chr(8595) & ":選択  Enter:決定  Esc:キャンセル"
+    lblHint.Caption = ChrW(8593) & ChrW(8595) & ":選択  Enter:決定  Esc:キャンセル"
     On Error GoTo 0
 
     ' 初期値設定（グローバル変数から）
@@ -50,6 +50,7 @@ End Sub
 
 ' ============================================================
 ' リスト更新（g_FilteredCandidates からリストボックスを構築）
+' 表示列の順番: C列 / D列 / A列
 ' ============================================================
 Private Sub PopulateList()
     Dim i As Long
@@ -63,9 +64,9 @@ Private Sub PopulateList()
 
     For i = 1 To modPartsIndex.g_FilteredCount
         With modPartsIndex.g_FilteredCandidates(i).Rec
-            lstCandidates.AddItem .ColC
-            lstCandidates.List(lstCandidates.ListCount - 1, 1) = .ColD
-            lstCandidates.List(lstCandidates.ListCount - 1, 2) = .ColA
+            lstCandidates.AddItem .ColC                                   ' 1列目: C列
+            lstCandidates.List(lstCandidates.ListCount - 1, 1) = .ColD    ' 2列目: D列
+            lstCandidates.List(lstCandidates.ListCount - 1, 2) = .ColA    ' 3列目: A列
         End With
     Next i
 
@@ -94,6 +95,7 @@ End Sub
 
 ' ============================================================
 ' テキスト変更時のリアルタイム絞り込み
+' インデックスに対して検索するため、DB走査は発生しない。
 ' ============================================================
 Private Sub txtFilter_Change()
     If m_Updating Then Exit Sub
@@ -116,11 +118,12 @@ End Sub
 
 ' ============================================================
 ' テキストボックスのキー操作
+' ↓キー: リストボックスの先頭にフォーカス移動
+' ↑キー: リストボックスの末尾にフォーカス移動
 ' ============================================================
 Private Sub txtFilter_KeyDown(ByVal KeyCode As MSForms.ReturnInteger, ByVal Shift As Integer)
     Select Case KeyCode
         Case vbKeyDown
-            ' ↓キーでリストボックスにフォーカス移動
             If lstCandidates.ListCount > 0 Then
                 If lstCandidates.ListIndex < 0 Then
                     lstCandidates.ListIndex = 0
@@ -129,7 +132,6 @@ Private Sub txtFilter_KeyDown(ByVal KeyCode As MSForms.ReturnInteger, ByVal Shif
                 KeyCode = 0
             End If
         Case vbKeyUp
-            ' ↑キーでもリストボックスの最後にフォーカス移動
             If lstCandidates.ListCount > 0 Then
                 lstCandidates.ListIndex = lstCandidates.ListCount - 1
                 lstCandidates.SetFocus
@@ -139,7 +141,20 @@ Private Sub txtFilter_KeyDown(ByVal KeyCode As MSForms.ReturnInteger, ByVal Shif
 End Sub
 
 ' ============================================================
-' 決定ボタン
+' リストボックスのキー操作
+' ↑キーで先頭を超えたらテキストボックスに戻る
+' ============================================================
+Private Sub lstCandidates_KeyDown(ByVal KeyCode As MSForms.ReturnInteger, ByVal Shift As Integer)
+    If KeyCode = vbKeyUp Then
+        If lstCandidates.ListIndex = 0 Then
+            txtFilter.SetFocus
+            KeyCode = 0
+        End If
+    End If
+End Sub
+
+' ============================================================
+' 決定ボタン（Default=True → Enter で発火）
 ' ============================================================
 Private Sub btnOK_Click()
     If lstCandidates.ListIndex < 0 Then
@@ -152,7 +167,7 @@ Private Sub btnOK_Click()
 End Sub
 
 ' ============================================================
-' キャンセルボタン
+' キャンセルボタン（Cancel=True → Esc で発火）
 ' ============================================================
 Private Sub btnCancel_Click()
     modPartsIndex.g_SelectedIndex = -1
@@ -160,7 +175,7 @@ Private Sub btnCancel_Click()
 End Sub
 
 ' ============================================================
-' フォームの×ボタン（右上の閉じるボタン）
+' フォームの×ボタン（右上の閉じるボタン）→ キャンセル扱い
 ' ============================================================
 Private Sub UserForm_QueryClose(Cancel As Integer, CloseMode As Integer)
     If CloseMode = vbFormControlMenu Then

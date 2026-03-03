@@ -2,13 +2,16 @@ Attribute VB_Name = "modPartsIndex"
 Option Explicit
 
 ' ============================================================
-' modPartsIndex - Parts Database インデックス管理モジュール
+' modPartsIndex - 部品コード抽出マクロ（標準モジュール）
+' ============================================================
+' parts database.xlsm の全シートC列をインデックス化し、
+' G列入力時に候補を検索・表示・転記する。
 ' ============================================================
 
 ' --- 定数 ---
 ' ネットワークパスを設定する場合はここを変更
 ' 例: "\\server\share\folder\parts database.xlsm"
-' 空文字の場合、ブックAと同じフォルダから検索する
+' 空文字の場合、ブックAと同じフォルダから検索する（フォールバック）
 Public Const PARTS_DB_FULLPATH As String = ""
 Public Const PARTS_DB_FILENAME As String = "parts database.xlsm"
 Public Const MAX_CANDIDATES As Long = 50
@@ -18,20 +21,20 @@ Public Const TARGET_SHEET_NAME As String = "入力シート"
 Public Type PartsRecord
     SheetName As String
     Row As Long
-    ColA As String
-    ColB As String
-    ColC As String
-    ColD As String
-    ColE As String
-    NormalizedC As String
+    ColA As String       ' DB A列
+    ColB As String       ' DB B列
+    ColC As String       ' DB C列（検索対象）
+    ColD As String       ' DB D列
+    ColE As String       ' DB E列（J列赤制御用）
+    NormalizedC As String ' 検索用正規化済みC列
 End Type
 
 ' --- 候補レコード（スコア付き） ---
 Public Type CandidateRecord
     Rec As PartsRecord
-    Score As Long
-    MatchPos As Long
-    LenDiff As Long
+    Score As Long        ' 1000=完全一致, 800=前方一致, 650=境界一致, 500=部分一致
+    MatchPos As Long     ' InStr位置（タイブレーク用）
+    LenDiff As Long      ' |Len(C)-Len(key)|（タイブレーク用）
 End Type
 
 ' --- グローバル変数 ---
@@ -41,8 +44,8 @@ Public g_IndexBuilt As Boolean
 Public g_bIgnoreChange As Boolean       ' 無限ループ防止フラグ
 
 ' --- フォーム連携用グローバル ---
-Public g_InitialKey As String
-Public g_SelectedIndex As Long          ' -1 = キャンセル, >0 = 選択されたインデックス
+Public g_InitialKey As String           ' フォームに渡す初期検索文字
+Public g_SelectedIndex As Long          ' -1=キャンセル, >0=選択された候補番号
 Public g_FilteredCandidates() As CandidateRecord
 Public g_FilteredCount As Long
 Public g_TotalMatchCount As Long        ' 50件制限前の総マッチ数
@@ -71,6 +74,7 @@ End Function
 
 ' ============================================================
 ' E列「1」判定（全空白除去して "1" かチェック）
+' 文字列化 → Trim → 半角/全角スペース全除去 → "1" なら True
 ' ============================================================
 Public Function IsValueOne(ByVal v As Variant) As Boolean
     Dim s As String
@@ -102,7 +106,7 @@ Private Function GetPartsDBPath() As String
     End If
 
     ' フォールバック：ブックAと同じフォルダ
-    fPath = ThisWorkbook.path & Application.PathSeparator & PARTS_DB_FILENAME
+    fPath = ThisWorkbook.Path & Application.PathSeparator & PARTS_DB_FILENAME
     If Dir(fPath) <> "" Then
         GetPartsDBPath = fPath
         Exit Function
@@ -144,6 +148,8 @@ End Function
 
 ' ============================================================
 ' インデックス構築（Workbook_Open または初回呼び出し時）
+' parts database の全シート C列(2行目以降)を走査し、
+' A/B/C/D/E列の値をメモリに保持する。
 ' ============================================================
 Public Sub BuildPartsIndex()
     Dim wbDB As Workbook
@@ -175,7 +181,7 @@ Public Sub BuildPartsIndex()
         Exit Sub
     End If
 
-    ' インデックス初期化
+    ' インデックス初期化（倍増方式で拡張）
     g_IndexCount = 0
     ReDim g_Index(1 To 2000)
 
@@ -228,6 +234,19 @@ End Sub
 
 ' ============================================================
 ' 候補検索（スコア付き・ソート済み）
+' インデックスに対して検索するため、DB走査は発生しない。
+'
+' スコアリング仕様:
+'   1000: 完全一致
+'    800: 前方一致（Cがkeyで始まる）
+'    650: 単語境界一致（スペース/記号区切り直後にkeyが出る）
+'    500: 通常の部分一致
+'
+' タイブレーク:
+'   1. マッチ位置が早い（InStr位置昇順）
+'   2. 長さ差が小さい（|Len(C)-Len(key)| 昇順）
+'   3. C列昇順
+'
 ' 戻り値: 50件制限前の総マッチ数
 ' ============================================================
 Public Function SearchCandidates(ByVal key As String) As Long
@@ -272,22 +291,27 @@ Public Function SearchCandidates(ByVal key As String) As Long
 
             ' スコア計算
             If normalizedC = normalizedKey Then
-                Score = 1000  ' 完全一致
+                ' 完全一致（グループ1: 最優先）
+                Score = 1000
             ElseIf MatchPos = 1 Then
-                Score = 800   ' 前方一致
+                ' 前方一致
+                Score = 800
             Else
                 ' 単語境界チェック（マッチ位置の直前の文字）
                 prevChar = Mid(normalizedC, MatchPos - 1, 1)
                 If prevChar = " " Or prevChar = "-" Or prevChar = "_" Or _
                    prevChar = "/" Or prevChar = "." Or prevChar = "(" Or _
+                   prevChar = "," Or prevChar = ";" Or _
                    prevChar = ChrW(&H3000) Then
-                    Score = 650  ' 単語境界一致
+                    ' 単語境界一致
+                    Score = 650
                 Else
-                    Score = 500  ' 通常の部分一致
+                    ' 通常の部分一致
+                    Score = 500
                 End If
             End If
 
-            LenDiff = Abs(Len(normalizedC) - Len(normalizedKey))
+            LenDiff = Abs(CLng(Len(normalizedC)) - CLng(Len(normalizedKey)))
 
             With tempCandidates(totalCount)
                 .Rec = g_Index(i)
@@ -310,7 +334,7 @@ Public Function SearchCandidates(ByVal key As String) As Long
     ReDim Preserve tempCandidates(1 To totalCount)
     SortCandidates tempCandidates, 1, totalCount
 
-    ' 最大50件に制限
+    ' 最大50件に制限（完全一致を優先して詰め、残り枠に部分一致）
     g_FilteredCount = totalCount
     If g_FilteredCount > MAX_CANDIDATES Then
         g_FilteredCount = MAX_CANDIDATES
@@ -323,7 +347,7 @@ Public Function SearchCandidates(ByVal key As String) As Long
 End Function
 
 ' ============================================================
-' クイックソート
+' クイックソート（候補配列をスコア順にソート）
 ' ============================================================
 Private Sub SortCandidates(ByRef arr() As CandidateRecord, ByVal lo As Long, ByVal hi As Long)
     If lo >= hi Then Exit Sub
@@ -361,7 +385,7 @@ End Sub
 ' 戻り値: 負=aが先, 正=bが先, 0=同等
 ' ============================================================
 Private Function CompareCandidates(ByRef a As CandidateRecord, ByRef b As CandidateRecord) As Long
-    ' スコア降順（高いスコアが先）
+    ' スコア降順（高いスコアが先＝完全一致が上）
     If a.Score > b.Score Then
         CompareCandidates = -1: Exit Function
     ElseIf a.Score < b.Score Then
@@ -382,12 +406,14 @@ Private Function CompareCandidates(ByRef a As CandidateRecord, ByRef b As Candid
         CompareCandidates = 1: Exit Function
     End If
 
-    ' C列昇順
+    ' C列昇順（最終タイブレーク）
     CompareCandidates = StrComp(a.Rec.ColC, b.Rec.ColC, vbTextCompare)
 End Function
 
 ' ============================================================
 ' J列背景色制御
+' DB E列=1 → 赤（RGB(255,0,0)）
+' DB E列≠1 → 塗りつぶし無し（xlNone）
 ' ============================================================
 Private Sub ApplyJColor(ByVal ws As Worksheet, ByVal Row As Long, ByVal eValue As String)
     If IsValueOne(eValue) Then
@@ -399,6 +425,14 @@ End Sub
 
 ' ============================================================
 ' 転記処理（E/F/G列 + J列背景色 + C列一致行への一括反映）
+'
+' 転記ルール:
+'   DB A列 → ブックA E列
+'   DB B列 → ブックA F列
+'   DB C列 → ブックA G列
+'
+' さらに、ブックA C列に同じ値を持つ全行にも同様に転記し、
+' J列の赤背景ON/OFFも同時に適用する。
 ' ============================================================
 Public Sub TransferData(ByVal targetRow As Long, ByVal candidateIdx As Long)
     Dim ws As Worksheet
@@ -412,10 +446,10 @@ Public Sub TransferData(ByVal targetRow As Long, ByVal candidateIdx As Long)
     rec = g_FilteredCandidates(candidateIdx).Rec
 
     ' --- 対象行に転記 ---
-    ws.Cells(targetRow, "E").Value = rec.ColA
-    ws.Cells(targetRow, "F").Value = rec.ColB
-    ws.Cells(targetRow, "G").Value = rec.ColC
-    ApplyJColor ws, targetRow, rec.ColE
+    ws.Cells(targetRow, "E").Value = rec.ColA   ' DB A列 → E列
+    ws.Cells(targetRow, "F").Value = rec.ColB   ' DB B列 → F列
+    ws.Cells(targetRow, "G").Value = rec.ColC   ' DB C列 → G列
+    ApplyJColor ws, targetRow, rec.ColE         ' J列背景制御
 
     ' --- C列一致行への一括反映 ---
     cVal = rec.ColC
@@ -425,31 +459,28 @@ Public Sub TransferData(ByVal targetRow As Long, ByVal candidateIdx As Long)
         ' C列を配列で一括読み込み（高速化）
         cRange = ws.Range("C2:C" & lastRow).Value
 
-        For r = 1 To UBound(cRange, 1)
-            If (r + 1) <> targetRow Then
-                If CStr(SafeCStrVariant(cRange(r, 1))) = cVal Then
-                    ws.Cells(r + 1, "E").Value = rec.ColA
-                    ws.Cells(r + 1, "F").Value = rec.ColB
-                    ws.Cells(r + 1, "G").Value = rec.ColC
-                    ApplyJColor ws, r + 1, rec.ColE
-                End If
+        ' 単一セルの場合の対応
+        If Not IsArray(cRange) Then
+            If CStr(cRange) = cVal And 2 <> targetRow Then
+                ws.Cells(2, "E").Value = rec.ColA
+                ws.Cells(2, "F").Value = rec.ColB
+                ws.Cells(2, "G").Value = rec.ColC
+                ApplyJColor ws, 2, rec.ColE
             End If
-        Next r
+        Else
+            For r = 1 To UBound(cRange, 1)
+                If (r + 1) <> targetRow Then
+                    If SafeCStr(cRange(r, 1)) = cVal Then
+                        ws.Cells(r + 1, "E").Value = rec.ColA
+                        ws.Cells(r + 1, "F").Value = rec.ColB
+                        ws.Cells(r + 1, "G").Value = rec.ColC
+                        ApplyJColor ws, r + 1, rec.ColE
+                    End If
+                End If
+            Next r
+        End If
     End If
 End Sub
-
-' ============================================================
-' Variant のセーフ文字列変換（配列読み込み用）
-' ============================================================
-Private Function SafeCStrVariant(ByVal v As Variant) As String
-    If IsError(v) Then
-        SafeCStrVariant = ""
-    ElseIf IsNull(v) Or IsEmpty(v) Then
-        SafeCStrVariant = ""
-    Else
-        SafeCStrVariant = CStr(v)
-    End If
-End Function
 
 ' ============================================================
 ' メイン処理（Worksheet_Change から呼ばれる）
@@ -460,11 +491,12 @@ Public Sub ProcessGColumnInput(ByVal targetRow As Long, ByVal key As String)
 
     On Error GoTo ErrorHandler
 
-    ' パフォーマンス設定を保存
+    ' パフォーマンス設定を保存・制御
     calcMode = Application.Calculation
+    Application.ScreenUpdating = False
     Application.Calculation = xlCalculationManual
 
-    ' インデックス確認
+    ' インデックス確認（未構築なら構築）
     If Not g_IndexBuilt Then BuildPartsIndex
     If Not g_IndexBuilt Then GoTo CleanUp
 
@@ -479,7 +511,7 @@ Public Sub ProcessGColumnInput(ByVal targetRow As Long, ByVal key As String)
     Application.ScreenUpdating = True
     Application.Calculation = calcMode
 
-    ' フォーム表示（モーダル）
+    ' フォーム表示（モーダル）- 候補0件でも表示する
     frmPartsPick.Show vbModal
 
     ' 結果処理
@@ -495,20 +527,25 @@ Public Sub ProcessGColumnInput(ByVal targetRow As Long, ByVal key As String)
 
         g_bIgnoreChange = False
     End If
+    ' Escキャンセル時（g_SelectedIndex = -1）は何もしない
 
     GoTo CleanUp
 
 ErrorHandler:
-    MsgBox "エラーが発生しました: " & Err.Description, vbExclamation, "エラー"
+    MsgBox "エラーが発生しました: " & Err.Description, vbExclamation, "部品コード抽出エラー"
 
 CleanUp:
+    ' 必ず復帰（エラー時も含む）
     g_bIgnoreChange = False
     Application.ScreenUpdating = True
+    On Error Resume Next
     Application.Calculation = calcMode
+    On Error GoTo 0
 End Sub
 
 ' ============================================================
 ' インデックス再構築（手動実行用マクロ）
+' Alt+F8 → RebuildIndex で実行可能
 ' ============================================================
 Public Sub RebuildIndex()
     g_IndexBuilt = False

@@ -5,7 +5,7 @@
 ' （VBAエディタ左側のプロジェクトエクスプローラーで「入力シート」をダブルクリック）
 '
 ' 対応イベント：
-'   G列(7)  → DB検索・E/F/G転記・J列赤制御
+'   G列(7)  → DB検索・E/F/G転記・J列赤制御（部品コード抽出）
 '   V列(22) → C列同値の行へV列の値を一括反映（空白も反映）
 ' ============================================================
 
@@ -21,7 +21,7 @@ Private Sub Worksheet_Change(ByVal Target As Range)
 
     ' --- 列で処理を分岐 ---
     Select Case Target.Column
-        Case 7   ' G列：DB検索→転記
+        Case 7   ' G列：部品コード抽出（DB検索→転記）
             HandleGColumnChange Target
 
         Case 22  ' V列：C列同値の行へV列を一括反映
@@ -30,12 +30,12 @@ Private Sub Worksheet_Change(ByVal Target As Range)
 End Sub
 
 ' ============================================================
-' G列変更時の処理（既存：DB検索→E/F/G転記＋J列赤制御）
+' G列変更時の処理（DB検索→E/F/G転記＋J列赤制御）
 ' ============================================================
 Private Sub HandleGColumnChange(ByVal Target As Range)
     Dim keyValue As String
 
-    ' 空文字なら何もしない
+    ' 空文字なら何もしない（E/F/G/Jも変えない）
     keyValue = Trim(CStr(Target.Value))
     If Len(keyValue) = 0 Then Exit Sub
 
@@ -54,7 +54,7 @@ ErrorHandlerG:
 End Sub
 
 ' ============================================================
-' V列変更時の処理（追加：C列同値の行へV列の値を一括反映）
+' V列変更時の処理（C列同値の行へV列の値を一括反映）
 ' ============================================================
 ' ・V列に値が入力/変更されたら、同じ行のC列をキーに、
 '   C列が同じ文字の全行のV列へ同じ値を設定する
@@ -92,13 +92,20 @@ Private Sub HandleVColumnChange(ByVal Target As Range)
     cRange = ws.Range("C2:C" & lastRow).Value
 
     ' C列一致行のV列に値を設定
-    For r = 1 To UBound(cRange, 1)
-        If (r + 1) <> Target.Row Then  ' 自分自身の行はスキップ（既に入力済み）
-            If CStr(cRange(r, 1)) = cKey Then
-                ws.Cells(r + 1, "V").Value = vValue
-            End If
+    If Not IsArray(cRange) Then
+        ' 単一セルの場合
+        If CStr(cRange) = cKey And 2 <> Target.Row Then
+            ws.Cells(2, "V").Value = vValue
         End If
-    Next r
+    Else
+        For r = 1 To UBound(cRange, 1)
+            If (r + 1) <> Target.Row Then  ' 自分自身の行はスキップ（既に入力済み）
+                If CStr(cRange(r, 1)) = cKey Then
+                    ws.Cells(r + 1, "V").Value = vValue
+                End If
+            End If
+        Next r
+    End If
 
 CleanUpV:
     modPartsIndex.g_bIgnoreChange = False

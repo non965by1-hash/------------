@@ -7,5 +7,6 @@
 
 Private Sub Workbook_Open()
     ' ブック起動時にparts databaseのインデックスを構築
+    ' これにより、G列入力時に毎回DB走査をせずに済む
     modPartsIndex.BuildPartsIndex
 End Sub
