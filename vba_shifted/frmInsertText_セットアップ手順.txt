@@ -1,0 +1,136 @@
+============================================================
+ frmInsertText セットアップ手順
+============================================================
+
+【1】標準モジュールの追加
+  VBAエディタ → 挿入 → 標準モジュール
+  modInsertText.bas の内容を貼り付け
+
+【2】UserForm の作成
+  VBAエディタ → 挿入 → ユーザーフォーム
+  フォーム名（プロパティ）: frmInsertText
+
+【3】フォーム上にコントロールを配置
+
+  ┌─────────────────────────────────────────────┐
+  │  文字列追加                            [×] │
+  │                                             │
+  │  選択中の可視セルに文字列を追加します        │
+  │                                             │
+  │  追加文字列:                                │
+  │  ┌─────────────────────────────────┐       │
+  │  │ txtTextToAdd                     │       │
+  │  └─────────────────────────────────┘       │
+  │                                             │
+  │  ┌─ 追加位置 (fraPosition) ──────┐        │
+  │  │  (●) 先頭に追加 (optHead)      │        │
+  │  │  ( ) 末尾に追加 (optTail)      │        │
+  │  └────────────────────────────────┘        │
+  │                                             │
+  │  [✓] 二重追加をスキップ (chkSkipDuplicate) │
+  │  [ ] 空白セルにも追加   (chkAddToEmpty)    │
+  │                                             │
+  │     [ OK ]     [ キャンセル ]               │
+  └─────────────────────────────────────────────┘
+
+【4】各コントロールのプロパティ設定
+
+  コントロール         プロパティ           値
+  ────────────────────────────────────────────
+  UserForm             (Name)              frmInsertText
+                       Caption             文字列追加
+                       Width               340
+                       Height              290
+
+  Label                (Name)              lblHint
+                       Caption             選択中の可視セルに文字列を追加します
+                       Top                 12
+                       Left                12
+                       Width               300
+
+  Label                (Name)              lblTextToAdd
+                       Caption             追加文字列:
+                       Top                 36
+                       Left                12
+
+  TextBox              (Name)              txtTextToAdd
+                       Top                 54
+                       Left                12
+                       Width               300
+                       Height              22
+
+  Frame                (Name)              fraPosition
+                       Caption             追加位置
+                       Top                 84
+                       Left                12
+                       Width               300
+                       Height              56
+
+  OptionButton         (Name)              optHead
+   (Frame内)           Caption             先頭に追加
+                       Value               True
+                       Top                 16
+                       Left                12
+
+  OptionButton         (Name)              optTail
+   (Frame内)           Caption             末尾に追加
+                       Value               False
+                       Top                 16
+                       Left                150
+
+  CheckBox             (Name)              chkSkipDuplicate
+                       Caption             二重追加をスキップ
+                       Value               True
+                       Top                 150
+                       Left                12
+
+  CheckBox             (Name)              chkAddToEmpty
+                       Caption             空白セルにも追加
+                       Value               False
+                       Top                 172
+                       Left                12
+
+  CommandButton        (Name)              btnOK
+                       Caption             OK
+                       Default             True
+                       Top                 205
+                       Left                80
+                       Width               75
+                       Height              28
+
+  CommandButton        (Name)              btnCancel
+                       Caption             キャンセル
+                       Cancel              True
+                       Top                 205
+                       Left                170
+                       Width               75
+                       Height              28
+
+【5】フォームコードの貼り付け
+  frmInsertText をダブルクリック → コードウィンドウに
+  frmInsertText_code.txt の内容を貼り付け
+
+============================================================
+ 使い方
+============================================================
+
+1. シート上で対象セル範囲を選択（フィルタ適用中でもOK）
+2. Alt+F8 →「文字列追加」を実行
+3. フォームが表示される
+   - 追加文字列を入力（例: "X-"）
+   - 先頭 or 末尾を選択
+   - 必要に応じてオプション設定
+4. OK → 確認ダイアログで内容を確認 → 「はい」で実行
+5. 完了メッセージに処理件数とスキップ数が表示される
+
+============================================================
+ 注意事項
+============================================================
+
+- 元に戻せません（Ctrl+Z不可）。重要なデータは事前にバックアップ推奨
+- 結合セルはスキップされます
+- 数値・日付は内部値の文字列表現に変換されます
+  例: 日付 2024/1/1 → "45292"（シリアル値）になる場合があります
+  表示形式を維持したい場合は .Text プロパティの使用を検討してください
+- 複数エリア選択（Ctrl+クリック）にも対応しています
+- フィルタで非表示の行、手動で非表示にした行は対象外です

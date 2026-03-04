@@ -1,0 +1,103 @@
+' ============================================================
+' frmInsertText - 文字列追加フォーム コード
+' ============================================================
+' このコードを UserForm「frmInsertText」のコードモジュールに貼り付けてください。
+'
+' 必要なコントロール（フォーム上に配置）：
+'
+'   コントロール種類     名前              説明
+'   ─────────────────────────────────────────────────────
+'   TextBox             txtTextToAdd      追加する文字列
+'   Frame              fraPosition        追加位置グループ枠
+'    └ OptionButton    optHead            先頭に追加（Default=True）
+'    └ OptionButton    optTail            末尾に追加
+'   CheckBox           chkSkipDuplicate   二重追加をスキップ（Default=True）
+'   CheckBox           chkAddToEmpty      空白セルにも追加（Default=False）
+'   CommandButton      btnOK              決定（Default=True）
+'   CommandButton      btnCancel          キャンセル（Cancel=True）
+'   Label              lblTextToAdd       「追加文字列:」ラベル
+'   Label              lblHint            操作説明ラベル
+'
+' フォームプロパティ：
+'   Caption = "文字列追加"
+'   Width   = 340
+'   Height  = 290
+'
+' ============================================================
+Option Explicit
+
+' ============================================================
+' フォーム初期化
+' ============================================================
+Private Sub UserForm_Initialize()
+    Me.Caption = "文字列追加"
+    Me.Width = 340
+    Me.Height = 290
+
+    ' ラベル
+    On Error Resume Next
+    lblTextToAdd.Caption = "追加文字列:"
+    lblHint.Caption = "選択中の可視セルに文字列を追加します"
+    On Error GoTo 0
+
+    ' テキストボックス初期値
+    txtTextToAdd.Text = ""
+    txtTextToAdd.SetFocus
+
+    ' 追加位置の初期値（先頭）
+    optHead.Value = True
+    optTail.Value = False
+
+    ' チェックボックス初期値
+    chkSkipDuplicate.Value = True
+    chkAddToEmpty.Value = False
+End Sub
+
+' ============================================================
+' OKボタン
+' ============================================================
+Private Sub btnOK_Click()
+    ' 入力チェック
+    If Len(txtTextToAdd.Text) = 0 Then
+        MsgBox "追加する文字列を入力してください。", vbExclamation, "入力エラー"
+        txtTextToAdd.SetFocus
+        Exit Sub
+    End If
+
+    ' グローバル変数に値を設定
+    modInsertText.g_InsertText = txtTextToAdd.Text
+    modInsertText.g_InsertToHead = optHead.Value
+    modInsertText.g_SkipDuplicate = chkSkipDuplicate.Value
+    modInsertText.g_AddToEmpty = chkAddToEmpty.Value
+    modInsertText.g_FormOK = True
+
+    Unload Me
+End Sub
+
+' ============================================================
+' キャンセルボタン
+' ============================================================
+Private Sub btnCancel_Click()
+    modInsertText.g_FormOK = False
+    Unload Me
+End Sub
+
+' ============================================================
+' フォームの×ボタン（右上の閉じるボタン）
+' ============================================================
+Private Sub UserForm_QueryClose(Cancel As Integer, CloseMode As Integer)
+    If CloseMode = vbFormControlMenu Then
+        Cancel = True
+        btnCancel_Click
+    End If
+End Sub
+
+' ============================================================
+' テキストボックスでEnterキー → OK実行
+' ============================================================
+Private Sub txtTextToAdd_KeyDown(ByVal KeyCode As MSForms.ReturnInteger, ByVal Shift As Integer)
+    If KeyCode = vbKeyReturn Then
+        btnOK_Click
+        KeyCode = 0
+    End If
+End Sub

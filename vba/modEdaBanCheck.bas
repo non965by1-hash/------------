@@ -2,23 +2,23 @@ Attribute VB_Name = "modEdaBanCheck"
 Option Explicit
 
 ' ============================================================
-' modEdaBanCheck - 枝番チェック マクロ
+' modEdaBanCheck - 枝番候補チェック マクロ
 ' ============================================================
-' Alt+F8 → 「枝番チェック」を選んで手動実行する。
+' Alt+F8 → 「枝番候補チェック」を選んで手動実行する。
 '
 ' 判定ロジック：
 '   1. I列の値でグループ化（I列空白行はスキップ）
 '   2. 各(I, A)単位で対象VコードのDistinct数を数える → vCountSum
 '   3. Iグループ内のA列Distinct種類数 >= 2 なら aBonus = 1
-'   4. Iグループ内のY列が「1」の行数 → yCount
-'   5. total = vCountSum + aBonus + yCount >= 3 なら対象
-'      → そのI値の全行のJ列を薄いブルーに塗る（既存色があれば変更しない）
+'   4. Iグループ内のX列が「1」の行数 → xCount
+'   5. total = vCountSum + aBonus + xCount >= 3 なら対象
+'      → そのI値の全行のJ列を濃いオレンジに塗る（既存色があれば変更しない）
 ' ============================================================
 
-' --- 薄いブルーの色定数 ---
-Private Const LIGHT_BLUE_R As Long = 221
-Private Const LIGHT_BLUE_G As Long = 235
-Private Const LIGHT_BLUE_B As Long = 247
+' --- 濃いオレンジの色定数 ---
+Private Const PAINT_R As Long = 255
+Private Const PAINT_G As Long = 165
+Private Const PAINT_B As Long = 0
 
 ' --- 対象Vコードリスト ---
 Private Const TARGET_V_CODES As String = "FDR,FDR1,FDR2,FDL,FDL1,FDL2,BDR,BDR1,BDR2,BDL,BDL1,BDL2"
@@ -29,7 +29,7 @@ Private Const THRESHOLD As Long = 3
 ' ============================================================
 ' メインマクロ（Alt+F8 から実行）
 ' ============================================================
-Public Sub 枝番チェック()
+Public Sub 枝番候補チェック()
     Dim ws As Worksheet
     Dim lastRow As Long
     Dim r As Long
@@ -59,9 +59,9 @@ Public Sub 枝番チェック()
     Dim dictIATypes As Object
     Set dictIATypes = CreateObject("Scripting.Dictionary")
 
-    ' dictIYCount: key="I値" → Y列が「1」の行数
-    Dim dictIYCount As Object
-    Set dictIYCount = CreateObject("Scripting.Dictionary")
+    ' dictIXCount: key="I値" → X列が「1」の行数
+    Dim dictIXCount As Object
+    Set dictIXCount = CreateObject("Scripting.Dictionary")
 
     ' dictIRows: key="I値" → Collection(行番号)
     Dim dictIRows As Object
@@ -71,10 +71,10 @@ Public Sub 枝番チェック()
     On Error GoTo ErrorHandler
     Set ws = ThisWorkbook.Worksheets("入力シート")
 
-    ' 最終行を A/I/V/Y 列の最大から決定
-    lastRow = GetMaxLastRow(ws, Array("A", "I", "V", "Y"))
+    ' 最終行を A/I/V/X 列の最大から決定
+    lastRow = GetMaxLastRow(ws, Array("A", "I", "V", "X"))
     If lastRow < 2 Then
-        MsgBox "データがありません（2行目以降が空）。", vbInformation, "枝番チェック"
+        MsgBox "データがありません（2行目以降が空）。", vbInformation, "枝番候補チェック"
         Exit Sub
     End If
 
@@ -82,11 +82,11 @@ Public Sub 枝番チェック()
     Application.ScreenUpdating = False
     Application.Calculation = xlCalculationManual
 
-    ' --- A/I/V/Y列を配列で一括読み込み ---
+    ' --- A/I/V/X列を配列で一括読み込み ---
     Dim arrA As Variant: arrA = ws.Range("A2:A" & lastRow).Value
     Dim arrI As Variant: arrI = ws.Range("I2:I" & lastRow).Value
     Dim arrV As Variant: arrV = ws.Range("V2:V" & lastRow).Value
-    Dim arrY As Variant: arrY = ws.Range("Y2:Y" & lastRow).Value
+    Dim arrX As Variant: arrX = ws.Range("X2:X" & lastRow).Value
 
     ' --- 集計ループ ---
     For r = 1 To UBound(arrI, 1)
