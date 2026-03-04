@@ -5,8 +5,7 @@
 ' （VBAエディタ左側のプロジェクトエクスプローラーで「入力シート」をダブルクリック）
 '
 ' 対応イベント：
-'   G列(7)  → DB検索・E/F/G転記・J列赤制御（部品コード抽出）
-'   V列(22) → C列同値の行へV列の値を一括反映（空白も反映）
+'   G列(7)  → DB検索・E/F/G転記・J列赤制御・X列フラグ制御
 ' ============================================================
 
 Private Sub Worksheet_Change(ByVal Target As Range)
@@ -19,23 +18,20 @@ Private Sub Worksheet_Change(ByVal Target As Range)
     ' 複数セル同時変更は処理しない（コピペ等）
     If Target.Cells.Count > 1 Then Exit Sub
 
-    ' --- 列で処理を分岐 ---
-    Select Case Target.Column
-        Case 7   ' G列：部品コード抽出（DB検索→転記）
-            HandleGColumnChange Target
+    ' G列(7)のみ処理
+    If Target.Column <> 7 Then Exit Sub
 
-        Case 22  ' V列：C列同値の行へV列を一括反映
-            HandleVColumnChange Target
-    End Select
+    ' G列：部品コード抽出（DB検索→転記）
+    HandleGColumnChange Target
 End Sub
 
 ' ============================================================
-' G列変更時の処理（DB検索→E/F/G転記＋J列赤制御）
+' G列変更時の処理（DB検索→E/F/G転記＋J列赤制御＋X列フラグ）
 ' ============================================================
 Private Sub HandleGColumnChange(ByVal Target As Range)
     Dim keyValue As String
 
-    ' 空文字なら何もしない（E/F/G/Jも変えない）
+    ' 空文字なら何もしない（E/F/G/J/Xも変えない）
     keyValue = Trim(CStr(Target.Value))
     If Len(keyValue) = 0 Then Exit Sub
 
@@ -50,69 +46,5 @@ Private Sub HandleGColumnChange(ByVal Target As Range)
     Exit Sub
 
 ErrorHandlerG:
-    Application.EnableEvents = True
-End Sub
-
-' ============================================================
-' V列変更時の処理（C列同値の行へV列の値を一括反映）
-' ============================================================
-' ・V列に値が入力/変更されたら、同じ行のC列をキーに、
-'   C列が同じ文字の全行のV列へ同じ値を設定する
-' ・空白にした場合も、該当行のV列をすべて空白にする
-' ・書き換えるのは入力シートのV列（該当行のみ）だけ
-' ============================================================
-Private Sub HandleVColumnChange(ByVal Target As Range)
-    Dim ws As Worksheet
-    Dim cKey As String
-    Dim vValue As Variant
-    Dim lastRow As Long
-    Dim r As Long
-    Dim cRange As Variant
-
-    Set ws = Me  ' 入力シート自身
-
-    ' 同じ行のC列の値をキーとして取得
-    cKey = CStr(ws.Cells(Target.Row, "C").Value)
-
-    ' C列が空の場合は反映先を特定できないので何もしない
-    If Len(Trim(cKey)) = 0 Then Exit Sub
-
-    ' V列に入力された値（空白も含む）
-    vValue = Target.Value
-
-    ' イベント無効化（V列書き込みによる再発火防止）
-    On Error GoTo ErrorHandlerV
-    Application.EnableEvents = False
-    modPartsIndex.g_bIgnoreChange = True
-
-    ' C列を配列で一括読み込み（高速化）
-    lastRow = ws.Cells(ws.Rows.Count, "C").End(xlUp).Row
-    If lastRow < 2 Then GoTo CleanUpV
-
-    cRange = ws.Range("C2:C" & lastRow).Value
-
-    ' C列一致行のV列に値を設定
-    If Not IsArray(cRange) Then
-        ' 単一セルの場合
-        If CStr(cRange) = cKey And 2 <> Target.Row Then
-            ws.Cells(2, "V").Value = vValue
-        End If
-    Else
-        For r = 1 To UBound(cRange, 1)
-            If (r + 1) <> Target.Row Then  ' 自分自身の行はスキップ（既に入力済み）
-                If CStr(cRange(r, 1)) = cKey Then
-                    ws.Cells(r + 1, "V").Value = vValue
-                End If
-            End If
-        Next r
-    End If
-
-CleanUpV:
-    modPartsIndex.g_bIgnoreChange = False
-    Application.EnableEvents = True
-    Exit Sub
-
-ErrorHandlerV:
-    modPartsIndex.g_bIgnoreChange = False
     Application.EnableEvents = True
 End Sub

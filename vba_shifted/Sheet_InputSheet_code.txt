@@ -2,12 +2,10 @@
 ' シート「入力シート」のコードモジュール（右1マスずらし版）
 ' ============================================================
 ' ★変更点: Target.Column = 7 (G列) → 8 (H列)
-' ★追加: V列(22) → D列同値の行へV列を一括反映（空白も反映）
 ' このコードを VBAエディタで「入力シート」シートのコードモジュールに貼り付けてください。
 '
 ' 対応イベント：
-'   H列(8)  → DB検索・F/G/H転記・K列赤制御
-'   V列(22) → D列同値の行へV列の値を一括反映（空白も反映）
+'   H列(8)  → DB検索・F/G/H転記・K列赤制御・Y列フラグ制御
 ' ============================================================
 
 Private Sub Worksheet_Change(ByVal Target As Range)
@@ -20,18 +18,15 @@ Private Sub Worksheet_Change(ByVal Target As Range)
     ' 複数セル同時変更は処理しない（コピペ等）
     If Target.Cells.Count > 1 Then Exit Sub
 
-    ' --- 列で処理を分岐 ---
-    Select Case Target.Column
-        Case modPartsIndex.COL_TRIGGER_NUM  ' H列(8)：DB検索→転記
-            HandleTriggerColumnChange Target
+    ' H列(8)のみ処理
+    If Target.Column <> modPartsIndex.COL_TRIGGER_NUM Then Exit Sub
 
-        Case 22  ' V列：D列同値の行へV列を一括反映
-            HandleVColumnChange Target
-    End Select
+    ' H列：DB検索→転記
+    HandleTriggerColumnChange Target
 End Sub
 
 ' ============================================================
-' H列変更時の処理（既存：DB検索→F/G/H転記＋K列赤制御）
+' H列変更時の処理（既存：DB検索→F/G/H転記＋K列赤制御＋Y列フラグ）
 ' ============================================================
 Private Sub HandleTriggerColumnChange(ByVal Target As Range)
     Dim keyValue As String
@@ -51,63 +46,5 @@ Private Sub HandleTriggerColumnChange(ByVal Target As Range)
     Exit Sub
 
 ErrorHandlerT:
-    Application.EnableEvents = True
-End Sub
-
-' ============================================================
-' V列変更時の処理（追加：D列同値の行へV列の値を一括反映）
-' ============================================================
-' ・V列に値が入力/変更されたら、同じ行のD列をキーに、
-'   D列が同じ文字の全行のV列へ同じ値を設定する
-'   （★元版ではC列をキーに使用。右1マスずらし版ではD列）
-' ・空白にした場合も、該当行のV列をすべて空白にする
-' ・書き換えるのは入力シートのV列（該当行のみ）だけ
-' ============================================================
-Private Sub HandleVColumnChange(ByVal Target As Range)
-    Dim ws As Worksheet
-    Dim matchKey As String
-    Dim vValue As Variant
-    Dim lastRow As Long
-    Dim r As Long
-    Dim matchRange As Variant
-
-    Set ws = Me  ' 入力シート自身
-
-    ' 同じ行のD列（一致判定列）の値をキーとして取得
-    matchKey = CStr(ws.Cells(Target.Row, modPartsIndex.COL_MATCH).Value)
-
-    ' D列が空の場合は反映先を特定できないので何もしない
-    If Len(Trim(matchKey)) = 0 Then Exit Sub
-
-    ' V列に入力された値（空白も含む）
-    vValue = Target.Value
-
-    ' イベント無効化（V列書き込みによる再発火防止）
-    On Error GoTo ErrorHandlerV
-    Application.EnableEvents = False
-    modPartsIndex.g_bIgnoreChange = True
-
-    ' D列を配列で一括読み込み（高速化）
-    lastRow = ws.Cells(ws.Rows.Count, modPartsIndex.COL_MATCH).End(xlUp).Row
-    If lastRow < 2 Then GoTo CleanUpV
-
-    matchRange = ws.Range(modPartsIndex.COL_MATCH & "2:" & modPartsIndex.COL_MATCH & lastRow).Value
-
-    ' D列一致行のV列に値を設定
-    For r = 1 To UBound(matchRange, 1)
-        If (r + 1) <> Target.Row Then  ' 自分自身の行はスキップ（既に入力済み）
-            If CStr(matchRange(r, 1)) = matchKey Then
-                ws.Cells(r + 1, "V").Value = vValue
-            End If
-        End If
-    Next r
-
-CleanUpV:
-    modPartsIndex.g_bIgnoreChange = False
-    Application.EnableEvents = True
-    Exit Sub
-
-ErrorHandlerV:
-    modPartsIndex.g_bIgnoreChange = False
     Application.EnableEvents = True
 End Sub

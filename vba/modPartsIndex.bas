@@ -411,15 +411,17 @@ Private Function CompareCandidates(ByRef a As CandidateRecord, ByRef b As Candid
 End Function
 
 ' ============================================================
-' J列背景色制御
-' DB E列=1 → 赤（RGB(255,0,0)）
-' DB E列≠1 → 塗りつぶし無し（xlNone）
+' J列背景色制御 + X列フラグ設定
+' DB E列=1 → J列赤（RGB(255,0,0)）+ X列に"1"
+' DB E列≠1 → J列塗りつぶし無し（xlNone）+ X列を空白
 ' ============================================================
 Private Sub ApplyJColor(ByVal ws As Worksheet, ByVal Row As Long, ByVal eValue As String)
     If IsValueOne(eValue) Then
         ws.Cells(Row, "J").Interior.Color = RGB(255, 0, 0)
+        ws.Cells(Row, "X").Value = "1"
     Else
         ws.Cells(Row, "J").Interior.Pattern = xlNone
+        ws.Cells(Row, "X").Value = ""
     End If
 End Sub
 
