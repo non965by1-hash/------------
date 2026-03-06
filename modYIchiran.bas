@@ -12,10 +12,8 @@ Private Type tItemInfo
     IValue          As String       ' I列の文字列
     ColNums()       As Long         ' 出現する列番番号の配列（ソート済み）
     ColNumCount     As Long         ' 出現する列番番号の種類数
-    IsEarth         As Boolean      ' EARTH判定
-    IsTwist         As Boolean      ' TWIST判定
-    MaxM            As Double       ' M列の最大値（通常データ用）
     SortCategory    As Long         ' 0=通常, 1=TWIST, 2=EARTH
+    MaxM            As Double       ' M列の最大値（通常データ用）
     HeadPriority    As Long         ' I列文頭による優先順位
 End Type
 
@@ -24,7 +22,7 @@ Public Sub CreateYIchiran()
     Dim wsInput As Worksheet
     Dim wsOutput As Worksheet
     Dim lastRow As Long
-    Dim i As Long, j As Long, k As Long
+    Dim i As Long, j As Long
     Dim cellA As String, cellI As String, cellM As String, cellQ As String
     Dim colNum As Long
 
@@ -71,7 +69,6 @@ Public Sub CreateYIchiran()
         cellA = Trim(CStr(wsInput.Cells(i, "A").Value))
         cellI = Trim(CStr(wsInput.Cells(i, "I").Value))
 
-        ' A列またはI列に値がある行をチェック
         If cellA <> "" Or cellI <> "" Then
             If Not IsValidColNum(cellA) Then
                 MsgBox "盤記号の前に列番番号を記入してください。", vbExclamation
@@ -93,13 +90,9 @@ Public Sub CreateYIchiran()
     Dim dictM As Object
     Set dictM = CreateObject("Scripting.Dictionary")
 
-    ' 全列番番号を収集 + 列番番号ごとの代表A列値（ヘッダー用）
+    ' 全列番番号を収集するDictionary
     Dim dictAllColNums As Object
     Set dictAllColNums = CreateObject("Scripting.Dictionary")
-
-    ' dictColHeader: key=列番番号(Long), value=A列の値（最初に見つかったもの）
-    Dim dictColHeader As Object
-    Set dictColHeader = CreateObject("Scripting.Dictionary")
 
     For i = 2 To lastRow
         cellA = Trim(CStr(wsInput.Cells(i, "A").Value))
@@ -107,15 +100,14 @@ Public Sub CreateYIchiran()
 
         ' A列から列番番号を取得
         colNum = ExtractColNum(cellA)
-        If colNum = 0 Then GoTo NextRow  ' 列番番号が取れない行はスキップ
+        If colNum = 0 Then GoTo NextRow
 
-        ' 全列番番号を記録 + ヘッダー用のA列値を保持
+        ' 全列番番号を記録
         If Not dictAllColNums.Exists(colNum) Then
             dictAllColNums.Add colNum, True
-            dictColHeader.Add colNum, cellA  ' 最初に見つかったA列値をヘッダーにする
         End If
 
-        ' I列が空の行はここでスキップ（列番番号の収集だけは上で済ませる）
+        ' I列が空の行はスキップ
         If cellI = "" Then GoTo NextRow
 
         ' I列文字ごとに列番番号を記録
@@ -131,9 +123,9 @@ Public Sub CreateYIchiran()
         ' Q列の収集
         cellQ = UCase(Trim(CStr(wsInput.Cells(i, "Q").Value)))
         If Not dictQ.Exists(cellI) Then
-            Dim qDict As Object
-            Set qDict = CreateObject("Scripting.Dictionary")
-            Set dictQ(cellI) = qDict
+            Dim qInner As Object
+            Set qInner = CreateObject("Scripting.Dictionary")
+            Set dictQ(cellI) = qInner
         End If
         If cellQ <> "" Then
             If Not dictQ(cellI).Exists(cellQ) Then
@@ -160,6 +152,12 @@ Public Sub CreateYIchiran()
 NextRow:
     Next i
 
+    ' --- dictColNumsが空の場合（I列にデータなし） ---
+    If dictColNums.Count = 0 Then
+        MsgBox "I列にデータがありません。", vbInformation
+        GoTo CleanUp
+    End If
+
     ' --- 2種類以上の列番番号にまたがるI値を抽出 ---
     Dim arrItems() As tItemInfo
     Dim itemCount As Long
@@ -168,8 +166,8 @@ NextRow:
     Dim keys As Variant
     keys = dictColNums.keys
 
+    Dim iVal As String
     For i = 0 To UBound(keys)
-        Dim iVal As String
         iVal = keys(i)
 
         If dictColNums(iVal).Count >= 2 Then
@@ -187,27 +185,22 @@ NextRow:
                 For j = 0 To UBound(cnKeys)
                     .ColNums(j + 1) = cnKeys(j)
                 Next j
-                ' 列番番号をソート（昇順）
+                ' 列番番号を昇順ソート
                 SortLongArray .ColNums, 1, .ColNumCount
 
-                ' EARTH/TWIST判定
-                .IsEarth = False
-                .IsTwist = False
+                ' EARTH/TWIST判定（EARTHが優先）
+                Dim hasEarth As Boolean, hasTwist As Boolean
+                hasEarth = False
+                hasTwist = False
                 If dictQ.Exists(iVal) Then
-                    If dictQ(iVal).Exists("EARTH") Then
-                        .IsEarth = True
-                    End If
-                    If Not .IsEarth Then
-                        If dictQ(iVal).Exists("TWIST") Then
-                            .IsTwist = True
-                        End If
-                    End If
+                    If dictQ(iVal).Exists("EARTH") Then hasEarth = True
+                    If dictQ(iVal).Exists("TWIST") Then hasTwist = True
                 End If
 
                 ' ソートカテゴリ: 0=通常, 1=TWIST, 2=EARTH
-                If .IsEarth Then
+                If hasEarth Then
                     .SortCategory = 2
-                ElseIf .IsTwist Then
+                ElseIf hasTwist Then
                     .SortCategory = 1
                 Else
                     .SortCategory = 0
@@ -231,35 +224,40 @@ NextRow:
         GoTo CleanUp
     End If
 
-    ' --- ソート（バブルソート） ---
-    ' ソート順:
-    '   1. SortCategory昇順（0=通常 → 1=TWIST → 2=EARTH）
-    '   2. 通常: M列降順 → 文頭優先順位昇順 → 文字列昇順
-    '   3. TWIST/EARTH: 文頭優先順位昇順 → 文字列昇順
-    Dim swapped As Boolean
+    ' --- シェルソート（バブルソートより高速） ---
+    Dim gap As Long, ii As Long, jj As Long
     Dim tempItem As tItemInfo
-    Do
-        swapped = False
-        For i = 1 To itemCount - 1
-            If ShouldSwap(arrItems(i), arrItems(i + 1)) Then
-                tempItem = arrItems(i)
-                arrItems(i) = arrItems(i + 1)
-                arrItems(i + 1) = tempItem
-                swapped = True
-            End If
-        Next i
-    Loop While swapped
+    gap = itemCount \ 2
+    Do While gap > 0
+        For ii = gap + 1 To itemCount
+            tempItem = arrItems(ii)
+            jj = ii
+            Do While jj > gap
+                If ShouldSwap(arrItems(jj - gap), tempItem) Then
+                    arrItems(jj) = arrItems(jj - gap)
+                    jj = jj - gap
+                Else
+                    Exit Do
+                End If
+            Loop
+            arrItems(jj) = tempItem
+        Next ii
+        gap = gap \ 2
+    Loop
 
     ' --- Y一覧シートの準備 ---
-    ' 既存のY一覧シートがあれば削除
-    Application.DisplayAlerts = False
+    ' 既存のY一覧シートがあれば削除（DisplayAlertsの復帰を保証）
+    Dim sheetDeleted As Boolean
+    sheetDeleted = False
     For Each ws In ThisWorkbook.Worksheets
         If ws.Name = "Y一覧" Then
+            Application.DisplayAlerts = False
             ws.Delete
+            Application.DisplayAlerts = True
+            sheetDeleted = True
             Exit For
         End If
     Next
-    Application.DisplayAlerts = True
 
     ' 新規作成
     Set wsOutput = ThisWorkbook.Worksheets.Add(After:=ThisWorkbook.Worksheets(ThisWorkbook.Worksheets.Count))
@@ -287,16 +285,11 @@ NextRow:
         dictColToPos.Add allColNums(i), (i - 1) * 2 + 1
     Next i
 
-    ' --- 1行目: ヘッダー（列番番号＋盤記号） ---
-    ' サンプルに合わせて、A列の値全体をヘッダーにする
+    ' --- 1行目: ヘッダー（列番番号のみ: 01_, 02_, ...） ---
     Dim outCol As Long
     For i = 1 To allColNumCount
         outCol = dictColToPos(allColNums(i))
-        If dictColHeader.Exists(allColNums(i)) Then
-            wsOutput.Cells(1, outCol).Value = dictColHeader(allColNums(i))
-        Else
-            wsOutput.Cells(1, outCol).Value = Format(allColNums(i), "00") & "_"
-        End If
+        wsOutput.Cells(1, outCol).Value = Format(allColNums(i), "00") & "_"
     Next i
 
     ' --- 2行目: Y連番 ---
@@ -306,9 +299,13 @@ NextRow:
     Next i
 
     ' --- 3行目以降: データ出力 ---
-    ' サンプルに合わせたレイアウト:
-    '   - 全ての奇数列に行番号（行単位で同じ番号）を出力
-    '   - 偶数列にはI値、または「-」、または空欄
+    ' 各列番番号ごとの連番カウンター
+    Dim colCounters() As Long
+    ReDim colCounters(1 To allColNumCount)
+    For i = 1 To allColNumCount
+        colCounters(i) = 0
+    Next i
+
     For i = 1 To itemCount
         Dim outRow As Long
         outRow = i + 2  ' 3行目から
@@ -325,21 +322,16 @@ NextRow:
                 cn = allColNums(j)
                 outCol = dictColToPos(cn)
 
-                ' 奇数列: 全列に行通し番号を出力（サンプル準拠）
-                wsOutput.Cells(outRow, outCol).Value = CStr(i)
-
-                ' 偶数列: I値 / - / 空欄
-                If cn >= minCN And cn <= maxCN Then
-                    ' 出現範囲内
-                    If ExistsInArray(.ColNums, .ColNumCount, cn) Then
-                        ' この列番番号に存在する → I値を書き込み
-                        wsOutput.Cells(outRow, outCol + 1).Value = .IValue
-                    Else
-                        ' 範囲内だが存在しない → 「-」
-                        wsOutput.Cells(outRow, outCol + 1).Value = "-"
-                    End If
+                If ExistsInArray(.ColNums, .ColNumCount, cn) Then
+                    ' この列番番号にI値が存在する → 連番＋I値を書き込み
+                    colCounters(j) = colCounters(j) + 1
+                    wsOutput.Cells(outRow, outCol).Value = CStr(colCounters(j))
+                    wsOutput.Cells(outRow, outCol + 1).Value = .IValue
+                ElseIf cn > minCN And cn < maxCN Then
+                    ' 出現範囲内だが存在しない → 偶数列に「-」
+                    wsOutput.Cells(outRow, outCol + 1).Value = "-"
                 End If
-                ' 範囲外（左端より左、右端より右）は空欄のまま
+                ' 範囲外（左端より左、右端より右）は何も出力しない
             Next j
         End With
     Next i
@@ -357,6 +349,7 @@ CleanUp:
     Application.Calculation = calcMode
     Application.EnableEvents = True
     Application.ScreenUpdating = True
+    Application.DisplayAlerts = True   ' 確実に復帰
     Exit Sub
 
 ErrHandler:
@@ -374,7 +367,6 @@ Private Function IsValidColNum(ByVal s As String) As Boolean
         IsValidColNum = False
         Exit Function
     End If
-    ' 先頭2文字が数字、3文字目が_
     If Mid(s, 1, 1) >= "0" And Mid(s, 1, 1) <= "9" And _
        Mid(s, 2, 1) >= "0" And Mid(s, 2, 1) <= "9" And _
        Mid(s, 3, 1) = "_" Then
@@ -385,8 +377,7 @@ Private Function IsValidColNum(ByVal s As String) As Boolean
 End Function
 
 '=============================================================================
-' A列文字列から列番番号（数値）を抽出
-' 例: "01_ABC" → 1, "05_xxx" → 5
+' A列文字列から列番番号（数値）を抽出  例: "01_ABC" → 1
 '=============================================================================
 Private Function ExtractColNum(ByVal s As String) As Long
     If IsValidColNum(s) Then
@@ -399,7 +390,6 @@ End Function
 '=============================================================================
 ' I列文頭による優先順位を返す
 ' U*, V*, W*, A*, B*, C*, F*, R*, S*, T*, O*, P*, M*, N* の順
-' 該当しない場合は最後尾扱い（99）
 '=============================================================================
 Private Function GetHeadPriority(ByVal s As String) As Long
     If Len(s) = 0 Then
@@ -431,6 +421,7 @@ End Function
 
 '=============================================================================
 ' ソート比較: item1がitem2の後ろに来るべきならTrue
+' （シェルソート用：item1が「前にいる要素」、tempがこれから挿入する要素）
 '=============================================================================
 Private Function ShouldSwap(ByRef item1 As tItemInfo, ByRef item2 As tItemInfo) As Boolean
     ShouldSwap = False
@@ -464,20 +455,28 @@ Private Function ShouldSwap(ByRef item1 As tItemInfo, ByRef item2 As tItemInfo) 
 End Function
 
 '=============================================================================
-' Long型配列のバブルソート（昇順）
+' Long型配列のソート（シェルソート・昇順）
 '=============================================================================
 Private Sub SortLongArray(ByRef arr() As Long, ByVal lb As Long, ByVal ub As Long)
-    Dim i As Long, j As Long
+    Dim gap As Long, i As Long, j As Long
     Dim tmp As Long
-    For i = lb To ub - 1
-        For j = lb To ub - (i - lb) - 1
-            If arr(j) > arr(j + 1) Then
-                tmp = arr(j)
-                arr(j) = arr(j + 1)
-                arr(j + 1) = tmp
-            End If
-        Next j
-    Next i
+    gap = (ub - lb + 1) \ 2
+    Do While gap > 0
+        For i = lb + gap To ub
+            tmp = arr(i)
+            j = i
+            Do While j >= lb + gap
+                If arr(j - gap) > tmp Then
+                    arr(j) = arr(j - gap)
+                    j = j - gap
+                Else
+                    Exit Do
+                End If
+            Loop
+            arr(j) = tmp
+        Next i
+        gap = gap \ 2
+    Loop
 End Sub
 
 '=============================================================================
