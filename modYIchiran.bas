@@ -245,16 +245,24 @@ NextRow:
         gap = gap \ 2
     Loop
 
+    ' --- 抽出結果に登場する列番番号だけを収集 ---
+    Dim dictUsedColNums As Object
+    Set dictUsedColNums = CreateObject("Scripting.Dictionary")
+    For i = 1 To itemCount
+        For j = 1 To arrItems(i).ColNumCount
+            If Not dictUsedColNums.Exists(arrItems(i).ColNums(j)) Then
+                dictUsedColNums.Add arrItems(i).ColNums(j), True
+            End If
+        Next j
+    Next i
+
     ' --- Y一覧シートの準備 ---
     ' 既存のY一覧シートがあれば削除（DisplayAlertsの復帰を保証）
-    Dim sheetDeleted As Boolean
-    sheetDeleted = False
     For Each ws In ThisWorkbook.Worksheets
         If ws.Name = "Y一覧" Then
             Application.DisplayAlerts = False
             ws.Delete
             Application.DisplayAlerts = True
-            sheetDeleted = True
             Exit For
         End If
     Next
@@ -266,12 +274,12 @@ NextRow:
     ' 全セルの表示形式を文字列に
     wsOutput.Cells.NumberFormatLocal = "@"
 
-    ' --- 全列番番号リストをソート（数値昇順） ---
+    ' --- 抽出結果に関与する列番番号のみをソート（数値昇順） ---
     Dim allColNums() As Long
     Dim allColNumCount As Long
     Dim acnKeys As Variant
-    acnKeys = dictAllColNums.keys
-    allColNumCount = dictAllColNums.Count
+    acnKeys = dictUsedColNums.keys
+    allColNumCount = dictUsedColNums.Count
     ReDim allColNums(1 To allColNumCount)
     For i = 0 To UBound(acnKeys)
         allColNums(i + 1) = acnKeys(i)
@@ -299,13 +307,8 @@ NextRow:
     Next i
 
     ' --- 3行目以降: データ出力 ---
-    ' 各列番番号ごとの連番カウンター
-    Dim colCounters() As Long
-    ReDim colCounters(1 To allColNumCount)
-    For i = 1 To allColNumCount
-        colCounters(i) = 0
-    Next i
-
+    ' 奇数列の連番は行単位の通し番号（サンプル準拠）
+    ' ただしI値が存在する列番番号の奇数列にのみ出力する
     For i = 1 To itemCount
         Dim outRow As Long
         outRow = i + 2  ' 3行目から
@@ -323,9 +326,8 @@ NextRow:
                 outCol = dictColToPos(cn)
 
                 If ExistsInArray(.ColNums, .ColNumCount, cn) Then
-                    ' この列番番号にI値が存在する → 連番＋I値を書き込み
-                    colCounters(j) = colCounters(j) + 1
-                    wsOutput.Cells(outRow, outCol).Value = CStr(colCounters(j))
+                    ' この列番番号にI値が存在する → 通し番号＋I値を書き込み
+                    wsOutput.Cells(outRow, outCol).Value = CStr(i)
                     wsOutput.Cells(outRow, outCol + 1).Value = .IValue
                 ElseIf cn > minCN And cn < maxCN Then
                     ' 出現範囲内だが存在しない → 偶数列に「-」
