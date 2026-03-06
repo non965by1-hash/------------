@@ -1,0 +1,58 @@
+Option Explicit
+
+' ============================================================
+' Y列連番記入マクロ
+' A列にデータがある最終行まで、Y2から1,2,3...と連番を記入する
+' （A列途中の空欄行もカウントに含む）
+' Alt+F8 → 「Y列連番記入」で実行
+' ============================================================
+
+Public Sub Y列連番記入()
+    Dim ws As Worksheet
+    Dim lastRow As Long
+    Dim r As Long
+
+    ' --- シート取得 ---
+    On Error Resume Next
+    Set ws = ThisWorkbook.Worksheets("入力シート")
+    On Error GoTo 0
+    If ws Is Nothing Then
+        MsgBox "シート「入力シート」が見つかりません。", vbExclamation, "Y列連番記入"
+        Exit Sub
+    End If
+
+    ' --- A列の最終行取得 ---
+    lastRow = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row
+    If lastRow < 2 Then
+        MsgBox "A列にデータがありません（2行目以降が空）。", vbInformation, "Y列連番記入"
+        Exit Sub
+    End If
+
+    ' --- パフォーマンス制御 ---
+    Dim calcMode As XlCalculation
+    calcMode = Application.Calculation
+    Application.ScreenUpdating = False
+    Application.EnableEvents = False
+    Application.Calculation = xlCalculationManual
+    On Error GoTo Cleanup
+
+    ' --- Y2～Y(lastRow) に連番記入 ---
+    For r = 2 To lastRow
+        ws.Cells(r, "Y").Value = r - 1
+    Next r
+
+    ' --- 完了メッセージ ---
+    MsgBox "完了しました。" & vbCrLf & _
+           "Y2～Y" & lastRow & " に連番（1～" & (lastRow - 1) & "）を記入しました。", _
+           vbInformation, "Y列連番記入"
+
+Cleanup:
+    Application.Calculation = calcMode
+    Application.EnableEvents = True
+    Application.ScreenUpdating = True
+
+    If Err.Number <> 0 Then
+        MsgBox "エラーが発生しました: " & Err.Description, vbCritical, "Y列連番記入"
+        Err.Clear
+    End If
+End Sub

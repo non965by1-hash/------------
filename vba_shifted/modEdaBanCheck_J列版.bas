@@ -1,0 +1,224 @@
+'===============================================================
+' 標準モジュール: modEdaBanCheck
+' マクロ名: 枝番候補チェック
+' 手動実行用（Alt+F8 から選択して実行）
+' 参照設定不要（CreateObject使用）
+'===============================================================
+Option Explicit
+
+Public Sub 枝番候補チェック()
+
+    '--- 定数 ---
+    Const SHEET_NAME    As String = "入力シート"
+    Const LIGHT_ORANGE  As Long = 120 + 200 * 256 + 255 * 65536  ' RGB(255, 200, 120)
+    Const THRESHOLD     As Long = 3
+
+    '--- 列番号 ---
+    Const COL_A As Long = 1   ' A列
+    Const COL_I As Long = 9   ' I列
+    Const COL_J As Long = 10  ' J列
+    Const COL_V As Long = 22  ' V列
+    Const COL_X As Long = 24  ' X列
+
+    '--- 対象シート取得 ---
+    Dim ws As Worksheet
+    On Error Resume Next
+    Set ws = ThisWorkbook.Worksheets(SHEET_NAME)
+    On Error GoTo 0
+    If ws Is Nothing Then
+        MsgBox "シート「" & SHEET_NAME & "」が見つかりません。", vbExclamation
+        Exit Sub
+    End If
+
+    '--- 最終行取得（I列基準） ---
+    Dim lastRow As Long
+    lastRow = ws.Cells(ws.Rows.Count, COL_I).End(xlUp).Row
+    If lastRow < 2 Then
+        MsgBox "データがありません（2行目以降が空）。", vbInformation
+        Exit Sub
+    End If
+
+    '--- パフォーマンス制御 ---
+    Dim calcMode As XlCalculation
+    calcMode = Application.Calculation
+    Application.ScreenUpdating = False
+    Application.EnableEvents = False
+    Application.Calculation = xlCalculationManual
+
+    On Error GoTo Cleanup
+
+    '--- データを配列に一括読み込み ---
+    Dim arrA As Variant, arrI As Variant, arrV As Variant, arrX As Variant
+    arrA = ws.Range(ws.Cells(2, COL_A), ws.Cells(lastRow, COL_A)).Value
+    arrI = ws.Range(ws.Cells(2, COL_I), ws.Cells(lastRow, COL_I)).Value
+    arrV = ws.Range(ws.Cells(2, COL_V), ws.Cells(lastRow, COL_V)).Value
+    arrX = ws.Range(ws.Cells(2, COL_X), ws.Cells(lastRow, COL_X)).Value
+
+    Dim rowCount As Long
+    rowCount = lastRow - 1  ' 配列の要素数（2行目開始のため）
+
+    '--- 対象Vコード判定用Dictionary ---
+    Dim dictTargetV As Object
+    Set dictTargetV = CreateObject("Scripting.Dictionary")
+    dictTargetV.CompareMode = 1  ' テキスト比較（大文字小文字無視）
+    Dim vCodes As Variant
+    vCodes = Array("FDR", "FDR1", "FDR2", "FDL", "FDL1", "FDL2", _
+                   "BDR", "BDR1", "BDR2", "BDL", "BDL1", "BDL2")
+    Dim vc As Variant
+    For Each vc In vCodes
+        dictTargetV(CStr(vc)) = True
+    Next vc
+
+    '--- 集計用Dictionary ---
+    ' dictRows:   I値 → 行番号のカンマ区切り文字列（シート上の行番号）
+    ' dictATypes: I値 → Dictionary(A値 → True)  ※distinct A
+    ' dictIAV:    "I" & Chr(0) & "A" → Dictionary(Vコード → True)  ※distinct V
+    ' dictXCount: I値 → X=1の行数(Long)
+    Dim dictRows As Object:    Set dictRows = CreateObject("Scripting.Dictionary")
+    Dim dictATypes As Object:  Set dictATypes = CreateObject("Scripting.Dictionary")
+    Dim dictIAV As Object:     Set dictIAV = CreateObject("Scripting.Dictionary")
+    Dim dictXCount As Object:  Set dictXCount = CreateObject("Scripting.Dictionary")
+
+    Dim r As Long
+    Dim keyI As String, keyA As String, keyIA As String, keyV As String, keyX As String
+    Dim SEP As String: SEP = ","
+    Dim IASEP As String: IASEP = Chr(0)  ' I値とA値の区切り文字
+
+    '=== パス1: 全行走査して集計 ===
+    For r = 1 To rowCount
+        keyI = Trim(CStr(arrI(r, 1)))
+        If keyI = "" Then GoTo NextRow  ' I列空白はスキップ
+
+        ' --- 行番号リスト（カンマ区切りで蓄積） ---
+        If dictRows.Exists(keyI) Then
+            dictRows(keyI) = dictRows(keyI) & SEP & (r + 1)
+        Else
+            dictRows.Add keyI, CStr(r + 1)
+        End If
+
+        ' --- A列 distinct ---
+        keyA = Trim(CStr(arrA(r, 1)))
+        If Not dictATypes.Exists(keyI) Then
+            dictATypes.Add keyI, CreateObject("Scripting.Dictionary")
+        End If
+        dictATypes(keyI)(keyA) = True
+
+        ' --- (I,A)ごとの対象Vコード distinct ---
+        keyV = Trim(CStr(arrV(r, 1)))
+        If keyV <> "" Then
+            If dictTargetV.Exists(keyV) Then
+                keyIA = keyI & IASEP & keyA
+                If Not dictIAV.Exists(keyIA) Then
+                    dictIAV.Add keyIA, CreateObject("Scripting.Dictionary")
+                End If
+                dictIAV(keyIA)(keyV) = True
+            End If
+        End If
+
+        ' --- X列=1 カウント ---
+        keyX = Trim(CStr(arrX(r, 1)))
+        If keyX = "1" Then
+            If dictXCount.Exists(keyI) Then
+                dictXCount(keyI) = dictXCount(keyI) + 1
+            Else
+                dictXCount.Add keyI, 1
+            End If
+        End If
+
+NextRow:
+    Next r
+
+    '=== パス2: Iグループごとに判定 & 着色 ===
+    Dim iKeys As Variant
+    iKeys = dictRows.Keys
+
+    Dim targetICount As Long: targetICount = 0
+    Dim paintedCount As Long: paintedCount = 0
+
+    Dim i As Long
+    For i = 0 To UBound(iKeys)
+        keyI = iKeys(i)
+
+        ' --- vCountSum: 各(I,A)ペアのdistinct Vコード数を合計 ---
+        Dim vCountSum As Long: vCountSum = 0
+
+        If dictATypes.Exists(keyI) Then
+            Dim aDict As Object
+            Set aDict = dictATypes(keyI)
+            If aDict.Count > 0 Then
+                Dim aKeys As Variant
+                aKeys = aDict.Keys
+                Dim a As Long
+                For a = 0 To UBound(aKeys)
+                    keyIA = keyI & IASEP & CStr(aKeys(a))
+                    If dictIAV.Exists(keyIA) Then
+                        vCountSum = vCountSum + dictIAV(keyIA).Count
+                    End If
+                Next a
+            End If
+        End If
+
+        ' --- aBonus: A列が2種類以上なら +1 ---
+        Dim aTypeCount As Long: aTypeCount = 0
+        If dictATypes.Exists(keyI) Then aTypeCount = dictATypes(keyI).Count
+        Dim aBonus As Long
+        If aTypeCount >= 2 Then aBonus = 1 Else aBonus = 0
+
+        ' --- xCount: X列=1 の行数 ---
+        Dim xCount As Long: xCount = 0
+        If dictXCount.Exists(keyI) Then xCount = dictXCount(keyI)
+
+        ' --- 最終判定 ---
+        Dim total As Long
+        total = vCountSum + aBonus + xCount
+
+        If total >= THRESHOLD Then
+            targetICount = targetICount + 1
+
+            ' --- J列着色（行番号文字列を分割） ---
+            Dim rowNums() As String
+            rowNums = Split(dictRows(keyI), SEP)
+
+            Dim j As Long
+            For j = 0 To UBound(rowNums)
+                Dim sheetRow As Long
+                sheetRow = CLng(rowNums(j))
+
+                Dim cellJ As Range
+                Set cellJ = ws.Cells(sheetRow, COL_J)
+
+                ' 未着色判定（堅牢：複数条件）
+                Dim isUnpainted As Boolean
+                isUnpainted = False
+                If cellJ.Interior.Pattern = xlNone Then
+                    isUnpainted = True
+                ElseIf cellJ.Interior.ColorIndex = xlColorIndexNone Then
+                    isUnpainted = True
+                End If
+
+                If isUnpainted Then
+                    cellJ.Interior.Color = LIGHT_ORANGE
+                    paintedCount = paintedCount + 1
+                End If
+            Next j
+        End If
+    Next i
+
+    '--- 結果表示 ---
+    MsgBox "完了しました。" & vbCrLf & vbCrLf & _
+           "対象Iグループ数: " & targetICount & vbCrLf & _
+           "着色セル数: " & paintedCount, vbInformation, "枝番候補チェック"
+
+Cleanup:
+    '--- パフォーマンス制御を必ず元に戻す ---
+    Application.Calculation = calcMode
+    Application.EnableEvents = True
+    Application.ScreenUpdating = True
+
+    If Err.Number <> 0 Then
+        MsgBox "エラーが発生しました。" & vbCrLf & _
+               "エラー番号: " & Err.Number & vbCrLf & _
+               Err.Description, vbCritical, "枝番候補チェック"
+    End If
+
+End Sub
